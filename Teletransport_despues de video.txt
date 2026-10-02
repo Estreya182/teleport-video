@@ -1,0 +1,79 @@
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Workspace = game:GetService("Workspace")
+
+local reproducirVideoEvent = ReplicatedStorage:WaitForChild("ReproducirVideoChoque")
+local videoFinalizadoEvent = ReplicatedStorage:WaitForChild("VideoFinalizado")
+
+local carpetasAviones = Workspace:WaitForChild("ZonasAviones")
+local carpetasIslas = Workspace:WaitForChild("SpawnsIslas")
+
+-- Tabla temporal en memoria para registrar qué isla le toca a cada jugador: [Player] = "1"
+local asignacionIslas = {}
+
+-- Función que detecta qué jugadores están dentro de una zona específica
+local function obtenerJugadoresEnZona(zonaPart)
+	local jugadoresEncontrados = {}
+	local overlapParams = OverlapParams.new()
+	overlapParams.FilterType = RaycastFilterType.Include
+	overlapParams.FilterDescendantsInstances = {}
+
+	for _, player in ipairs(Players:GetPlayers()) do
+		if player.Character then
+			table.insert(overlapParams.FilterDescendantsInstances, player.Character)
+		end
+	end
+
+	local partesEnZona = Workspace:GetPartsInPart(zonaPart, overlapParams)
+	for _, part in ipairs(partesEnZona) do
+		local player = Players:GetPlayerFromCharacter(part.Parent)
+		if player and not table.find(jugadoresEncontrados, player) then
+			table.insert(jugadoresEncontrados, player)
+		end
+	end
+
+	return jugadoresEncontrados
+end
+
+-- Limpieza si el jugador se desconecta durante el video
+Players.PlayerRemoving:Connect(function(player)
+	asignacionIslas[player] = nil
+end)
+
+-- Teletransportación tras el video
+videoFinalizadoEvent.OnServerEvent:Connect(function(player)
+	task.wait(1)
+	
+	local idIsla = asignacionIslas[player]
+	if not idIsla then return end
+
+	local destinoSpawn = carpetasIslas:FindFirstChild("Isla_" .. idIsla)
+	local character = player.Character
+
+	if destinoSpawn and character and character:FindFirstChild("HumanoidRootPart") then
+		character:PivotTo(destinoSpawn.CFrame + Vector3.new(0, 3, 0))
+	end
+
+	asignacionIslas[player] = nil -- Libera el registro
+end)
+
+-- Función principal que busca automáticamente todos los aviones creados
+local function dispararChoqueGlobal()
+	for _, avionPart in ipairs(carpetasAviones:GetChildren()) do
+		if avionPart:IsA("BasePart") then
+			-- Extrae el número tras "Avion_" (ej. "Avion_1" -> "1", "Avion_25" -> "25")
+			local id = string.match(avionPart.Name, "%d+")
+			
+			if id then
+				local tripulantes = obtenerJugadoresEnZona(avionPart)
+				for _, player in ipairs(tripulantes) do
+					asignacionIslas[player] = id
+					reproducirVideoEvent:FireClient(player)
+				end
+			end
+		end
+	end
+end
+
+-- EJEMPLO DE PRUEBA: activa la secuencia tras 10 segundos
+task.delay(10, dispararChoqueGlobal)
